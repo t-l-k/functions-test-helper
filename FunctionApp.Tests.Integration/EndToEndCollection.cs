@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.IO;
 using Xunit;
 
 namespace FunctionApp.Tests.Integration
@@ -15,11 +16,24 @@ namespace FunctionApp.Tests.Integration
         // ICollectionFixture<> interfaces.
         
     }
+    
+    public class FastTestFixture : EndToEndFastTestFixture
+    {
+        public static string SystemUnderTestIniPath => "SystemUnderTestHost.ini";
 
-    public class TestFixture : EndToEndTestFixture
+        public FastTestFixture() :
+            base(SystemUnderTestIniPath, typeof(TestFixture).Assembly, typeof(HttpTrigger).Assembly, "CSharp")
+        {
+        }
+
+        // If desired you can specify which functions load up in this fixture
+        // protected override IEnumerable<string> GetActiveFunctions() => new[] { "BlobTrigger", "EventTrigger", "HttpTrigger" };
+    }
+
+    public class TestFixture : EndToEndTestRootCopyFixture
     {
         public TestFixture() :
-            base(@"../../../../FunctionApp/bin/Debug/netstandard2.0", "CSharp")
+                   base(@"../../../../FunctionApp/bin/Debug/netstandard2.0", "CSharp")
         {
         }
 

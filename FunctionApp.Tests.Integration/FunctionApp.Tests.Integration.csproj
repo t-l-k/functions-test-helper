@@ -1,7 +1,7 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <TargetFramework>netcoreapp2.2</TargetFramework>
 
     <IsPackable>false</IsPackable>
   </PropertyGroup>
@@ -16,8 +16,20 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\FunctionApp\FunctionApp.csproj" />
+    <ProjectReference Include="..\FunctionApp\FunctionApp.csproj">
+      <Private>true</Private>
+    </ProjectReference>
     <ProjectReference Include="..\FunctionTestHelper\FunctionTestHelper.csproj" />
   </ItemGroup>
+
+  <!-- It would probably be best to capture the output path of FunctionApp.csproj into a file as it is the basis of running the WebJobs host -->
+  <!-- It would also fit nicely into CI/CD processes as we don't know always know what build configuration we may target -->
+  <!-- Best to do it just after it resolves the references because the item target paths are scrubbed from MSBuild's memory after they're built -->
+
+  <!-- Perhaps it would be best served by a custom MSBuild target against the project reference (filtered) that runs MSBuild to get the hosts.json location -->
+    <Target Name="CaptureTestHostContent" AfterTargets="Build">
+        <WriteLinesToFile file="$(OutputPath)\SystemUnderTestHost.ini" Overwrite="true" Lines="[SystemUnderTestHost]" />
+        <WriteLinesToFile file="$(OutputPath)\SystemUnderTestHost.ini" Lines="%(ReferenceCopyLocalPaths.Filename) = %(ReferenceCopyLocalPaths.Identity)" Condition="'%(ReferenceCopyLocalPaths.Extension)'=='.dll'" />
+    </Target>
 
 </Project>

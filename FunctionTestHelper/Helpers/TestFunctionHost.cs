@@ -85,7 +85,7 @@ namespace FunctionTestHelper
 
                 if (!running)
                 {
-                    await Task.Delay(500);
+                    await Task.Delay(250);
                 }
             }
         }

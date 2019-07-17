@@ -21,13 +21,54 @@ using Xunit;
 
 namespace FunctionTestHelper
 {
-    public abstract class EndToEndTestsBase<TTestFixture> :
-        IClassFixture<TTestFixture> where TTestFixture : EndToEndTestFixture, new()
+    // NOTE: These were changed from the originally forked code as there seemed to be a double-initialisation cost 
+    // due to a test class being both decorated with a CollectionAttribute and also implementing IClassFixture, but 
+    // ultimately the test class was only ever being fixtured with the server constructed in the IClassFixture implementation.
+
+    /// <summary>
+    /// A test class having its own dedicated function host server for all test methods in its scope. 
+    /// </summary>
+    /// <typeparam name="TTestFixture"></typeparam>
+    public abstract class EndToEndClassScopedTestsBase<TTestFixture> : EndToEndTestsBaseBase<TTestFixture>,
+        IClassFixture<TTestFixture> 
+        where TTestFixture : EndToEndTestFixture, new()
+    {
+        public EndToEndClassScopedTestsBase(TTestFixture fixture) : base(fixture)
+        {
+        }
+    }
+    
+    /// <summary>
+    /// A test class having a shared function host server for the entire test suite.
+    /// </summary>
+    /// <typeparam name="TTestFixture"></typeparam>
+    [Collection("Function collection")]
+    public abstract class EndToEndCollectionScopedTestsBase<TTestFixture> : EndToEndTestsBaseBase<TTestFixture>
+       where TTestFixture : EndToEndTestFixture, new()
+    {
+        public EndToEndCollectionScopedTestsBase(TTestFixture fixture) : base(fixture)
+        {
+        }
+    }
+
+    // TODO: Keep this interface whilst it is in use by rest of dependencies
+    [Collection("Function collection")]
+    public abstract class EndToEndTestsBase<TTestFixture> : EndToEndTestsBaseBase<TTestFixture>,
+        IClassFixture<TTestFixture> 
+        where TTestFixture : EndToEndTestFixture, new()
+    {
+        public EndToEndTestsBase(TTestFixture fixture) : base(fixture)
+        {
+        }
+    }
+
+    public abstract class EndToEndTestsBaseBase<TTestFixture>
+        where TTestFixture : EndToEndTestFixture, new()
     {
         private INameResolver _nameResolver = new DefaultNameResolver();
         private static readonly ScriptSettingsManager SettingsManager = ScriptSettingsManager.Instance;
 
-        public EndToEndTestsBase(TTestFixture fixture)
+        public EndToEndTestsBaseBase(TTestFixture fixture)
         {
             Fixture = fixture;
         }
