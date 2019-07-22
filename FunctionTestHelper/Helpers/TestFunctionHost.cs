@@ -1,66 +1,136 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the MIT License. See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
+using FunctionTestHelper;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Azure.WebJobs;
-using Microsoft.Azure.WebJobs.Script;
 using Microsoft.Azure.WebJobs.Script.WebHost;
+using Microsoft.Azure.WebJobs.Script.WebHost.DependencyInjection;
 using Microsoft.Azure.WebJobs.Script.WebHost.Models;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Microsoft.WebJobs.Script.Tests;
 using Newtonsoft.Json.Linq;
+using System.Net;
 
-namespace FunctionTestHelper
+namespace Microsoft.Azure.WebJobs.Script.Tests
 {
+    public class TestHostServiceProviderFactory : IServiceProviderFactory<IServiceCollection>
+    {
+        public IServiceCollection CreateBuilder(IServiceCollection services)
+        {
+            return services;
+        }
+
+        public IServiceProvider CreateServiceProvider(IServiceCollection services)
+        {
+            return new WebHostServiceProvider(services);
+        }
+    }
+
     public class TestFunctionHost : IDisposable
     {
-        private readonly WebHostSettings _hostSettings;
+        private readonly ScriptApplicationHostOptions _hostOptions;
         private readonly TestServer _testServer;
         private readonly string _appRoot;
-        private readonly TestLoggerProvider _loggerProvider = new TestLoggerProvider();
+        private readonly TestLoggerProvider _webHostLoggerProvider = new TestLoggerProvider();
+        private readonly TestLoggerProvider _scriptHostLoggerProvider = new TestLoggerProvider();
+        private readonly WebJobsScriptHostService _hostService;
 
-        public TestFunctionHost(string appRoot)
+        public TestFunctionHost(string scriptPath, string logPath,
+            Action<IServiceCollection> configureWebHostServices = null,
+            Action<IWebJobsBuilder> configureScriptHostWebJobsBuilder = null,
+            Action<IConfigurationBuilder> configureScriptHostAppConfiguration = null,
+            Action<ILoggingBuilder> configureScriptHostLogging = null,
+            Action<IServiceCollection> configureScriptHostServices = null)
         {
-            _appRoot = appRoot;
+            _appRoot = scriptPath;
 
-            _hostSettings = new WebHostSettings
+            _hostOptions = new ScriptApplicationHostOptions
             {
                 IsSelfHost = true,
                 ScriptPath = _appRoot,
-                LogPath = Path.Combine(Path.GetTempPath(), @"Functions"),
-                SecretsPath = Environment.CurrentDirectory // not used
+                LogPath = logPath,
+                SecretsPath = Environment.CurrentDirectory, // not used
+                HasParentScope = true
             };
 
-            _testServer = new TestServer(
-                Microsoft.AspNetCore.WebHost.CreateDefaultBuilder()
-                .UseStartup<Startup>()
+            var optionsMonitor = TestHelpers.CreateOptionsMonitor(_hostOptions);
+            var builder = new WebHostBuilder()
+                .ConfigureLogging(b =>
+                {
+                    b.AddProvider(_webHostLoggerProvider);
+                })
                 .ConfigureServices(services =>
                 {
-                    services.Replace(new ServiceDescriptor(typeof(WebHostSettings), _hostSettings));
-                    services.Replace(new ServiceDescriptor(typeof(ILoggerProviderFactory), new TestLoggerProviderFactory(_loggerProvider, includeDefaultLoggerProviders: false)));
-                    services.Replace(new ServiceDescriptor(typeof(ISecretManager), new TestSecretManager()));
-                }));
+                    services.Replace(new ServiceDescriptor(typeof(ISecretManagerProvider), new TestSecretManagerProvider(new TestSecretManager())));
+                    services.Replace(ServiceDescriptor.Singleton<IServiceProviderFactory<IServiceCollection>>(new TestHostServiceProviderFactory()));
+                    services.Replace(new ServiceDescriptor(typeof(IOptions<ScriptApplicationHostOptions>), new OptionsWrapper<ScriptApplicationHostOptions>(_hostOptions)));
+                    services.Replace(new ServiceDescriptor(typeof(IOptionsMonitor<ScriptApplicationHostOptions>), optionsMonitor));
 
-            HttpClient = new HttpClient(new UpdateContentLengthHandler(_testServer.CreateHandler()));
-            HttpClient.BaseAddress = new Uri("https://localhost/");
+                    // Allows us to configure services as the last step, thereby overriding anything
+                    services.AddSingleton(new PostConfigureServices(configureWebHostServices));
+                })
+                .ConfigureScriptHostWebJobsBuilder(scriptHostWebJobsBuilder =>
+                {
+                    scriptHostWebJobsBuilder.AddAzureStorage();
+                    configureScriptHostWebJobsBuilder?.Invoke(scriptHostWebJobsBuilder);
+                })
+                .ConfigureScriptHostAppConfiguration(scriptHostConfigurationBuilder =>
+                {
+                    scriptHostConfigurationBuilder.AddTestSettings();
+                    configureScriptHostAppConfiguration?.Invoke(scriptHostConfigurationBuilder);
+                })
+                .ConfigureScriptHostLogging(scriptHostLoggingBuilder =>
+                {
+                    scriptHostLoggingBuilder.AddProvider(_scriptHostLoggerProvider);
+                    scriptHostLoggingBuilder.AddFilter<TestLoggerProvider>(_ => true);
+                    configureScriptHostLogging?.Invoke(scriptHostLoggingBuilder);
+                })
+                .ConfigureScriptHostServices(scriptHostServices =>
+                {
+                    configureScriptHostServices?.Invoke(scriptHostServices);
+                })
+                .UseStartup<TestStartup>();
+
+            _testServer = new TestServer(builder);
+
+            HttpClient = new HttpClient(new UpdateContentLengthHandler(_testServer.CreateHandler()))
+            {
+                BaseAddress = new Uri("http://localhost/")
+            };
+
+            var manager = _testServer.Host.Services.GetService<IScriptHostManager>();
+            _hostService = manager as WebJobsScriptHostService;
+            StartAsync().GetAwaiter().GetResult();
         }
 
-        public ScriptHostConfiguration ScriptConfig => _testServer.Host.Services.GetService<WebHostResolver>().GetScriptHostConfiguration(_hostSettings);
+        public IServiceProvider JobHostServices => _hostService.Services;
 
-        public ISecretManager SecretManager => _testServer.Host.Services.GetService<ISecretManager>();
+        public ScriptJobHostOptions ScriptOptions => JobHostServices.GetService<IOptions<ScriptJobHostOptions>>().Value;
 
-        public string LogPath => _hostSettings.LogPath;
+        public ISecretManager SecretManager => _testServer.Host.Services.GetService<ISecretManagerProvider>().Current;
 
-        public string ScriptPath => _hostSettings.ScriptPath;
+        public string LogPath => _hostOptions.LogPath;
+
+        public string ScriptPath => _hostOptions.ScriptPath;
+
+        public HttpClient HttpClient { get; private set; }
 
         public async Task<string> GetMasterKeyAsync()
         {
@@ -74,28 +144,36 @@ namespace FunctionTestHelper
             return secrets.First().Value;
         }
 
-        public HttpClient HttpClient { get; private set; }
+        public async Task RestartAsync(CancellationToken cancellationToken)
+        {
+            await _hostService.RestartHostAsync(cancellationToken);
+        }
 
-        public async Task StartAsync()
+        private async Task StartAsync()
         {
             bool running = false;
             while (!running)
             {
-                running = await IsHostRunning(HttpClient);
+                running = await IsHostStarted(HttpClient);
 
                 if (!running)
                 {
-                    await Task.Delay(250);
+                    await Task.Delay(50);
                 }
             }
         }
 
         public void SetNugetPackageSources(params string[] sources)
         {
+            WriteNugetPackageSources(_appRoot, sources);
+        }
+
+        public static void WriteNugetPackageSources(string appRoot, params string[] sources)
+        {
             XmlWriterSettings settings = new XmlWriterSettings();
             settings.Indent = true;
 
-            using (XmlWriter writer = XmlWriter.Create(Path.Combine(_appRoot, "nuget.config"), settings))
+            using (XmlWriter writer = XmlWriter.Create(Path.Combine(appRoot, "nuget.config"), settings))
             {
                 writer.WriteStartElement("configuration");
                 writer.WriteStartElement("packageSources");
@@ -111,13 +189,24 @@ namespace FunctionTestHelper
             }
         }
 
-        public IEnumerable<LogMessage> GetLogMessages() => _loggerProvider.GetAllLogMessages();
+        /// <summary>
+        /// The functions host has two logger providers -- one at the WebHost level and one at the ScriptHost level.
+        /// These providers use different LoggerProviders, so it's important to know which one is receiving the logs.
+        /// </summary>
+        /// <returns>The messages from the ScriptHost LoggerProvider</returns>
+        public IList<LogMessage> GetScriptHostLogMessages() => _scriptHostLoggerProvider.GetAllLogMessages();
+        public IEnumerable<LogMessage> GetScriptHostLogMessages(string category) => GetScriptHostLogMessages().Where(p => p.Category == category);
 
-        public IEnumerable<LogMessage> GetLogMessages(string category) => GetLogMessages().Where(p => p.Category == category);
+        /// <summary>
+        /// The functions host has two logger providers -- one at the WebHost level and one at the ScriptHost level.
+        /// These providers use different LoggerProviders, so it's important to know which one is receiving the logs.
+        /// </summary>
+        /// <returns>The messages from the WebHost LoggerProvider</returns>
+        public IList<LogMessage> GetWebHostLogMessages() => _webHostLoggerProvider.GetAllLogMessages();
 
-        public string GetLog() => string.Join(Environment.NewLine, GetLogMessages());
+        public string GetLog() => string.Join(Environment.NewLine, GetScriptHostLogMessages());
 
-        public void ClearLogMessages() => _loggerProvider.ClearAllLogMessages();
+        public void ClearLogMessages() => _scriptHostLoggerProvider.ClearAllLogMessages();
 
         public async Task BeginFunctionAsync(string functionName, JToken payload)
         {
@@ -132,39 +221,6 @@ namespace FunctionTestHelper
             request.Content = new StringContent(wrappedPayload.ToString(), Encoding.UTF8, "application/json");
             HttpResponseMessage response = await HttpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
-        }
-
-        public async Task InstallBindingExtension(string packageName, string packageVersion)
-        {
-            HostSecretsInfo secrets = await SecretManager.GetHostSecretsAsync();
-            string uri = $"admin/host/extensions?code={secrets.MasterKey}";
-            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, uri);
-
-            string payload = new JObject
-            {
-                { "id", packageName },
-                {"version", packageVersion }
-            }.ToString(Newtonsoft.Json.Formatting.None);
-
-            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
-            var response = await HttpClient.SendAsync(request);
-            var jobStatusUri = response.Headers.Location;
-            string status = null;
-            do
-            {
-                await Task.Delay(500);
-                response = await CheckExtensionInstallStatus(jobStatusUri);
-                var jobStatus = await response.Content.ReadAsAsync<JObject>();
-                status = jobStatus["status"].ToString();
-            } while (status == "Started");
-
-            if (status != "Succeeded")
-            {
-                throw new InvalidOperationException("Failed to install extension.");
-            }
-
-            // TODO: Find a better way to ensure the site has restarted.
-            await Task.Delay(3000);
         }
 
         private async Task<HttpResponseMessage> CheckExtensionInstallStatus(Uri jobLocation)
@@ -197,20 +253,26 @@ namespace FunctionTestHelper
             _testServer.Dispose();
         }
 
-        private async Task<bool> IsHostRunning(HttpClient client)
+        private async Task<bool> IsHostStarted(HttpClient client)
         {
+            //HostStatus status = await GetHostStatusAsync();
+            //return status.State == $"{ScriptHostState.Running}" || status.State == $"{ScriptHostState.Error}";
+
             HostSecretsInfo secrets = await SecretManager.GetHostSecretsAsync();
 
             // Workaround for https://github.com/Azure/azure-functions-host/issues/2397 as the base URL
-            // doesn't currently start the host. 
+            // doesn't currently start the host.
             // Note: the master key "1234" is from the TestSecretManager.
             using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, $"/admin/functions/dummyName/status?code={secrets.MasterKey}"))
             {
                 using (HttpResponseMessage response = await client.SendAsync(request))
                 {
-                    return response.StatusCode == HttpStatusCode.NoContent || response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.NotFound;
+                    //return response.StatusCode == HttpStatusCode.NoContent || response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.NotFound;
+                    // Throw away this response. 
                 }
             }
+
+            return _hostService.State == ScriptHostState.Running || _hostService.State == ScriptHostState.Error;
         }
 
         private class UpdateContentLengthHandler : DelegatingHandler
@@ -229,6 +291,44 @@ namespace FunctionTestHelper
                 }
 
                 return base.SendAsync(request, cancellationToken);
+            }
+        }
+
+        private class TestStartup
+        {
+            private Startup _startup;
+            private readonly PostConfigureServices _postConfigure;
+
+            public TestStartup(IConfiguration configuration, PostConfigureServices postConfigure)
+            {
+                _startup = new Startup(configuration);
+                _postConfigure = postConfigure;
+            }
+
+            public void ConfigureServices(IServiceCollection services)
+            {
+                _startup.ConfigureServices(services);
+                _postConfigure?.ConfigureServices(services);
+            }
+
+            public void Configure(AspNetCore.Builder.IApplicationBuilder app, AspNetCore.Hosting.IApplicationLifetime applicationLifetime, AspNetCore.Hosting.IHostingEnvironment env, ILoggerFactory loggerFactory)
+            {
+                _startup.Configure(app, applicationLifetime, env, loggerFactory);
+            }
+        }
+
+        private class PostConfigureServices
+        {
+            private readonly Action<IServiceCollection> _postConfigure;
+
+            public PostConfigureServices(Action<IServiceCollection> postConfigure)
+            {
+                _postConfigure = postConfigure;
+            }
+
+            public void ConfigureServices(IServiceCollection services)
+            {
+                _postConfigure?.Invoke(services);
             }
         }
     }

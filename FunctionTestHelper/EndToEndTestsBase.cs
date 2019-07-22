@@ -15,9 +15,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.WindowsAzure.Storage.Queue;
 using Microsoft.WindowsAzure.Storage.Table;
+using Microsoft.Azure.WebJobs.Script.Tests;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Xunit;
+using Microsoft.Extensions.Configuration;
 
 namespace FunctionTestHelper
 {
@@ -65,11 +67,15 @@ namespace FunctionTestHelper
     public abstract class EndToEndTestsBaseBase<TTestFixture>
         where TTestFixture : EndToEndTestFixture, new()
     {
-        private INameResolver _nameResolver = new DefaultNameResolver();
+        private INameResolver _nameResolver;
+        private IConfiguration _configuration;
         private static readonly ScriptSettingsManager SettingsManager = ScriptSettingsManager.Instance;
 
         public EndToEndTestsBaseBase(TTestFixture fixture)
         {
+            _configuration = TestHelpers.GetTestConfiguration();
+            _nameResolver = new DefaultNameResolver(_configuration);
+
             Fixture = fixture;
         }
 
@@ -81,7 +87,7 @@ namespace FunctionTestHelper
             await TestHelpers.Await(() =>
            {
                // search the logs for token "TestResult:" and parse the following JSON
-               var logs = Fixture.Host.GetLogMessages(LogCategories.CreateFunctionUserCategory(functionName));
+               var logs = Fixture.Host.GetScriptHostLogMessages(LogCategories.CreateFunctionUserCategory(functionName));
                if (logs != null)
                {
                    logEntry = logs.Select(p => p.FormattedMessage).SingleOrDefault(p => p != null && p.Contains("TestResult:"));
@@ -101,7 +107,7 @@ namespace FunctionTestHelper
 
             await TestHelpers.Await(() =>
             {
-                logMessage = Fixture.Host.GetLogMessages(LogCategories.CreateFunctionUserCategory(functionName)).SingleOrDefault(filter);
+                logMessage = Fixture.Host.GetScriptHostLogMessages(LogCategories.CreateFunctionUserCategory(functionName)).SingleOrDefault(filter);
                 return logMessage != null;
             }, timeout);
 
@@ -119,7 +125,7 @@ namespace FunctionTestHelper
 
             await TestHelpers.Await(() =>
             {
-                logMessage = Fixture.Host.GetLogMessages().SingleOrDefault(filter);
+                logMessage = Fixture.Host.GetScriptHostLogMessages().SingleOrDefault(filter);
                 return logMessage != null;
             });
 

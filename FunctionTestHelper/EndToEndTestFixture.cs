@@ -12,6 +12,8 @@ using Microsoft.Azure.WebJobs.Host;
 using Microsoft.Azure.WebJobs.Script;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Ini;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Azure.WebJobs.Script.Tests;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.WindowsAzure.Storage.Queue;
@@ -40,24 +42,24 @@ namespace FunctionTestHelper
 
             UpdateEnvironmentVariables(Path.Combine(systemUnderTestPath, "local.settings.json"));
 
-            string connectionString = AmbientConnectionStringProvider.Instance.GetConnectionString(ConnectionStringNames.Storage);
+            Host = new TestFunctionHost(systemUnderTestPath, LogPath);
+
+            string connectionString = Host.JobHostServices.GetService<IConfiguration>().GetWebJobsConnectionString(ConnectionStringNames.Storage);
             CloudStorageAccount storageAccount = CloudStorageAccount.Parse(connectionString);
 
             QueueClient = storageAccount.CreateCloudQueueClient();
             BlobClient = storageAccount.CreateCloudBlobClient();
             TableClient = storageAccount.CreateCloudTableClient();
 
-            Host = new TestFunctionHost(systemUnderTestPath);
+            //// We can currently only support a single extension.
+            //if (extensionName != null && extensionVersion != null)
+            //{
+            //    Host.SetNugetPackageSources("http://www.myget.org/F/azure-appservice/api/v2", "https://api.nuget.org/v3/index.json");
+            //    Host.InstallBindingExtension(extensionName, extensionVersion).Wait(TimeSpan.FromSeconds(30));
+            //}
 
-            // We can currently only support a single extension.
-            if (extensionName != null && extensionVersion != null)
-            {
-                Host.SetNugetPackageSources("http://www.myget.org/F/azure-appservice/api/v2", "https://api.nuget.org/v3/index.json");
-                Host.InstallBindingExtension(extensionName, extensionVersion).Wait(TimeSpan.FromSeconds(30));
-            }
+            //var startTask =  Host.StartAsync().Wait(TimeSpan.FromSeconds(30));
 
-            var startTask =  Host.StartAsync().Wait(TimeSpan.FromSeconds(30));
-            
         }
 
         public void Dispose()
@@ -69,6 +71,9 @@ namespace FunctionTestHelper
 
     public abstract class EndToEndTestFixture
     {
+        // Log file path
+        public string LogPath => Path.Combine(Path.GetTempPath(), @"Functions");
+
         public CloudQueueClient QueueClient { get; protected internal set; }
 
         public CloudTableClient TableClient { get; protected internal set; }
@@ -123,23 +128,23 @@ namespace FunctionTestHelper
 
             UpdateEnvironmentVariables(Path.Combine(_copiedRootPath, "local.settings.json"));
 
-            string connectionString = AmbientConnectionStringProvider.Instance.GetConnectionString(ConnectionStringNames.Storage);
+            string connectionString = Host.JobHostServices.GetService<IConfiguration>().GetWebJobsConnectionString(ConnectionStringNames.Storage);
             CloudStorageAccount storageAccount = CloudStorageAccount.Parse(connectionString);
 
             QueueClient = storageAccount.CreateCloudQueueClient();
             BlobClient = storageAccount.CreateCloudBlobClient();
             TableClient = storageAccount.CreateCloudTableClient();
 
-            Host = new TestFunctionHost(_copiedRootPath);
+            Host = new TestFunctionHost(_copiedRootPath, LogPath);
 
             // We can currently only support a single extension.
-            if (extensionName != null && extensionVersion != null)
-            {
-                Host.SetNugetPackageSources("http://www.myget.org/F/azure-appservice/api/v2", "https://api.nuget.org/v3/index.json");
-                Host.InstallBindingExtension(extensionName, extensionVersion).Wait(TimeSpan.FromSeconds(30));
-            }
+            //if (extensionName != null && extensionVersion != null)
+            //{
+            //    Host.SetNugetPackageSources("http://www.myget.org/F/azure-appservice/api/v2", "https://api.nuget.org/v3/index.json");
+            //    Host.InstallBindingExtension(extensionName, extensionVersion).Wait(TimeSpan.FromSeconds(30));
+            //}
 
-            Host.StartAsync().Wait(TimeSpan.FromSeconds(30));
+            //Host.StartAsync().Wait(TimeSpan.FromSeconds(30));
         }
 
         /// <summary>
