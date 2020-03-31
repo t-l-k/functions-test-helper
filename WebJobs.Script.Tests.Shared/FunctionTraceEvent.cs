@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the MIT License. See License.txt in the project root for license information.
 
 using System;
@@ -35,6 +35,10 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
         public string HostInstanceId { get; set; }
 
         public string ActivityId { get; set; }
+
+        public string RuntimeSiteName { get; set; }
+
+        public string SlotName { get; set; }
 
         public override string ToString()
         {

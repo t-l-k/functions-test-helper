@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the MIT License. See License.txt in the project root for license information.
 
 using System;
@@ -13,7 +13,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Azure.WebJobs.Script.Abstractions;
-using Microsoft.Azure.WebJobs.Script.Rpc;
+using Microsoft.Azure.WebJobs.Script.Workers;
+using Microsoft.Azure.WebJobs.Script.Workers.Rpc;
 using Microsoft.Azure.WebJobs.Script.WebHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -251,15 +252,15 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
             }
         }
 
-        public static IList<WorkerConfig> GetTestWorkerConfigs()
+        public static IList<RpcWorkerConfig> GetTestWorkerConfigs()
         {
             var nodeWorkerDesc = GetTestWorkerDescription("node", ".js");
             var javaWorkerDesc = GetTestWorkerDescription("java", ".jar");
 
-            return new List<WorkerConfig>()
+            return new List<RpcWorkerConfig>()
             {
-                new WorkerConfig() { Description = nodeWorkerDesc },
-                new WorkerConfig() { Description = javaWorkerDesc },
+                new RpcWorkerConfig() { Description = nodeWorkerDesc },
+                new RpcWorkerConfig() { Description = javaWorkerDesc },
             };
         }
 
@@ -287,9 +288,9 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
             }
         }
 
-        public static WorkerDescription GetTestWorkerDescription(string language, string extension)
+        public static RpcWorkerDescription GetTestWorkerDescription(string language, string extension)
         {
-            return new WorkerDescription()
+            return new RpcWorkerDescription()
             {
                 Extensions = new List<string>()
                  {

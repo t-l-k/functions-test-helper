@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the MIT License. See License.txt in the project root for license information.
 
 using System;
@@ -8,16 +8,16 @@ using Microsoft.Azure.WebJobs.Script;
 
 namespace Microsoft.Azure.WebJobs.Script.Tests
 {
-    public class NullScriptHostEnvironment : IScriptJobHostEnvironment
-    {
-        public string EnvironmentName => string.Empty;
+    ////public class NullScriptHostEnvironment : IScriptJobHostEnvironment
+    ////{
+    ////    public string EnvironmentName => string.Empty;
 
-        public void RestartHost()
-        {
-        }
+    ////    public void RestartHost()
+    ////    {
+    ////    }
 
-        public void Shutdown()
-        {
-        }
-    }
+    ////    public void Shutdown()
+    ////    {
+    ////    }
+    ////}
 }
